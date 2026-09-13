@@ -1,0 +1,1141 @@
+-- Project-L - Role-Based Key Authentication Edition
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local TeleportService = game:GetService("TeleportService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+ 
+-- Key & Access Configuration (Discord tags tracked for admin records)
+-- nagoldsa342 (Discord: nagoldsa1234) -> Owner
+-- quozrr (Discord: johnlikeshotdogs) -> Admin
+local KEYS_CONFIG = {
+    ["Logan"] = {
+        Role = "Owner",
+        AllowedUsers = {"nagoldsa342"},
+        RequireDiscord = false
+    },
+    ["john"] = {
+        Role = "Admin",
+        AllowedUsers = {"quozrr", "nagoldsa342"},
+        RequireDiscord = false
+    },
+    ["Project-L"] = {
+        Role = "User",
+        AllowedUsers = {}, -- Anyone
+        RequireDiscord = true
+    }
+}
+ 
+local DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1548589898729132094/34KDJ8mdQwng_qlAC8E9CmjwyTBakqmn7fsrXXRZPekZ7abdVQANjxQvGH1kzdCj19J7"
+ 
+-- Authentication & Loading Animation GUI
+local AuthGui = Instance.new("ScreenGui")
+AuthGui.Name = "ProjectLAuth"
+AuthGui.Parent = game.CoreGui
+AuthGui.ResetOnSpawn = false
+ 
+local AuthFrame = Instance.new("Frame")
+AuthFrame.Size = UDim2.new(0, 340, 0, 250)
+AuthFrame.Position = UDim2.new(0.5, -170, 0.5, -125)
+AuthFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+AuthFrame.BorderSizePixel = 1
+AuthFrame.BorderColor3 = Color3.fromRGB(45, 45, 45)
+AuthFrame.Parent = AuthGui
+ 
+local AuthTitle = Instance.new("TextLabel")
+AuthTitle.Size = UDim2.new(1, 0, 0, 35)
+AuthTitle.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
+AuthTitle.BorderSizePixel = 0
+AuthTitle.Font = Enum.Font.Code
+AuthTitle.Text = "  Project-L - Authentication"
+AuthTitle.TextColor3 = Color3.fromRGB(200, 200, 200)
+AuthTitle.TextSize = 12
+AuthTitle.TextXAlignment = Enum.TextXAlignment.Left
+AuthTitle.Parent = AuthFrame
+ 
+local AuthStatus = Instance.new("TextLabel")
+AuthStatus.Size = UDim2.new(1, -30, 0, 40)
+AuthStatus.Position = UDim2.new(0, 15, 0, 42)
+AuthStatus.BackgroundTransparency = 1
+AuthStatus.Font = Enum.Font.Code
+AuthStatus.Text = "Enter Key to continue."
+AuthStatus.TextColor3 = Color3.fromRGB(100, 160, 255)
+AuthStatus.TextSize = 13
+AuthStatus.Parent = AuthFrame
+ 
+local KeyBox = Instance.new("TextBox")
+KeyBox.Size = UDim2.new(1, -30, 0, 36)
+KeyBox.Position = UDim2.new(0, 15, 0, 88)
+KeyBox.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+KeyBox.BorderColor3 = Color3.fromRGB(45, 45, 45)
+KeyBox.Font = Enum.Font.Code
+KeyBox.PlaceholderText = "Enter Key..."
+KeyBox.Text = ""
+KeyBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+KeyBox.TextSize = 13
+KeyBox.Parent = AuthFrame
+ 
+local DiscordCopyAuthBtn = Instance.new("TextButton")
+DiscordCopyAuthBtn.Size = UDim2.new(1, -30, 0, 32)
+DiscordCopyAuthBtn.Position = UDim2.new(0, 15, 0, 132)
+DiscordCopyAuthBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+DiscordCopyAuthBtn.BorderColor3 = Color3.fromRGB(45, 45, 45)
+DiscordCopyAuthBtn.Font = Enum.Font.Code
+DiscordCopyAuthBtn.Text = "1. Copy Discord Link (discord.gg/7ZxCXQYDF)"
+DiscordCopyAuthBtn.TextColor3 = Color3.fromRGB(100, 160, 255)
+DiscordCopyAuthBtn.TextSize = 11
+DiscordCopyAuthBtn.Parent = AuthFrame
+ 
+local discordCopiedByAuth = false
+DiscordCopyAuthBtn.MouseButton1Click:Connect(function()
+    discordCopiedByAuth = true
+    if setclipboard then
+        setclipboard("https://discord.gg/7ZxCXQYDF")
+        DiscordCopyAuthBtn.Text = "Discord Copied! (Ready to Submit)"
+        DiscordCopyAuthBtn.TextColor3 = Color3.fromRGB(100, 255, 100)
+    else
+        DiscordCopyAuthBtn.Text = "Discord Copied! (Ready to Submit)"
+        DiscordCopyAuthBtn.TextColor3 = Color3.fromRGB(100, 255, 100)
+    end
+end)
+ 
+local SubmitBtn = Instance.new("TextButton")
+SubmitBtn.Size = UDim2.new(1, -30, 0, 35)
+SubmitBtn.Position = UDim2.new(0, 15, 0, 175)
+SubmitBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+SubmitBtn.BorderColor3 = Color3.fromRGB(45, 45, 45)
+SubmitBtn.Font = Enum.Font.Code
+SubmitBtn.Text = "Submit Key"
+SubmitBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+SubmitBtn.TextSize = 13
+SubmitBtn.Parent = AuthFrame
+ 
+local authenticated = false
+local sessionRole = "User" -- Owner, Admin, User
+ 
+SubmitBtn.MouseButton1Click:Connect(function()
+    local inputKey = KeyBox.Text
+    local keyData = KEYS_CONFIG[inputKey]
+ 
+    if not keyData then
+        AuthStatus.Text = "Invalid Key!"
+        AuthStatus.TextColor3 = Color3.fromRGB(255, 60, 60)
+        KeyBox.Text = ""
+        return
+    end
+ 
+    -- Check specific user permissions
+    if #keyData.AllowedUsers > 0 then
+        local allowed = false
+        for _, username in ipairs(keyData.AllowedUsers) do
+            if LocalPlayer.Name == username then
+                allowed = true
+                break
+            end
+        end
+        if not allowed then
+            AuthStatus.Text = "You are not authorized to use this key!"
+            AuthStatus.TextColor3 = Color3.fromRGB(255, 60, 60)
+            KeyBox.Text = ""
+            return
+        end
+    end
+ 
+    -- Check if Discord copy is required for this key
+    if keyData.RequireDiscord and not discordCopiedByAuth then
+        AuthStatus.Text = "You must copy the Discord link first!"
+        AuthStatus.TextColor3 = Color3.fromRGB(255, 180, 60)
+        return
+    end
+ 
+    sessionRole = keyData.Role
+    authenticated = true
+    AuthGui:Destroy()
+ 
+    -- Send execution log to webhook (including Discord handle tags for reference)
+    pcall(function()
+        local discordTag = (LocalPlayer.Name == "nagoldsa342") and "nagoldsa1234" or ((LocalPlayer.Name == "quozrr") and "johnlikeshotdogs" or "N/A (User Key)")
+        local roleColor = sessionRole == "Owner" and 16777215 or (sessionRole == "Admin" and 16711680 or 65280)
+        local data = {
+            ["content"] = "",
+            ["embeds"] = {{
+                ["title"] = "Project-L Execution Log",
+                ["description"] = string.format("**User:** %s\n**Discord Tag:** %s\n**User ID:** %d\n**Role:** %s", LocalPlayer.Name, discordTag, LocalPlayer.UserId, sessionRole),
+                ["color"] = roleColor,
+                ["footer"] = {["text"] = "Game ID: " .. tostring(game.PlaceId)}
+            }}
+        }
+        local encoded = HttpService:JSONEncode(data)
+        if request then
+            request({
+                Url = DISCORD_WEBHOOK,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = encoded
+            })
+        elseif syn and syn.request then
+            syn.request({
+                Url = DISCORD_WEBHOOK,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = encoded
+            })
+        end
+    end)
+end)
+ 
+while not authenticated do
+    task.wait(0.1)
+end
+ 
+-- Main Script Interface
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "ProjectLGUI"
+ScreenGui.Parent = game.CoreGui
+ScreenGui.ResetOnSpawn = false
+ 
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 560, 0, 640)
+MainFrame.Position = UDim2.new(0.5, -280, 0.5, -320)
+MainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+MainFrame.BorderSizePixel = 1
+MainFrame.BorderColor3 = Color3.fromRGB(45, 45, 45)
+MainFrame.Parent = ScreenGui
+ 
+-- Draggable Window
+local dragging, dragInput, dragStart, startPos
+local TopBar = Instance.new("TextLabel")
+TopBar.Size = UDim2.new(1, 0, 0, 32)
+TopBar.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
+TopBar.BorderSizePixel = 0
+TopBar.Font = Enum.Font.Code
+ 
+-- Top bar color & title configuration based on session role
+local topBarText = "  Project-L [" .. sessionRole .. " Edition] - discord.gg/7ZxCXQYDF"
+local topBarColor = Color3.fromRGB(100, 160, 255) -- Default User blue
+if sessionRole == "Owner" then
+    topBarColor = Color3.fromRGB(255, 255, 255) -- White for Owner
+elseif sessionRole == "Admin" then
+    topBarColor = Color3.fromRGB(255, 90, 90) -- Red for Admin
+end
+ 
+TopBar.Text = topBarText
+TopBar.TextColor3 = topBarColor
+TopBar.TextSize = 13
+TopBar.TextXAlignment = Enum.TextXAlignment.Left
+TopBar.Parent = MainFrame
+ 
+TopBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+ 
+TopBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        dragInput = input
+    end
+end)
+ 
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+ 
+-- Config State & Keybinds
+local Config = {
+    Aimbot = false,
+    SilentAim = false,
+    AlwaysAimbot = false,
+    TeamCheckMain = false,
+    VisibleCheck = false,
+    AimbotFOV = 150,
+    SilentAimFOV = 150,
+    Smoothing = 5,
+    Triggerbot = false,
+    TriggerbotTeamCheck = false,
+    Ragebot = false,
+    RagebotOrbit = false,
+    OrbitSpeed = 2,
+    OrbitRadius = 8,
+    HvHVoidSpam = false,
+    SelectedTarget = "",
+    ESPBox = false,
+    ESPSkeleton = false,
+    ESPHealthBar = false,
+    ESPName = false,
+    TeamCheckESP = false,
+    Noclip = false,
+    Fly = false,
+    Speed = false,
+    SpeedVal = 50,
+    InfJump = false,
+    AutoLoadTeleport = true
+}
+ 
+local Keybinds = {
+    Aimbot = Enum.UserInputType.MouseButton2,
+    Triggerbot = Enum.KeyCode.T,
+    Ragebot = Enum.KeyCode.R,
+    ESPAll = Enum.KeyCode.B,
+    Noclip = Enum.KeyCode.N,
+    Fly = Enum.KeyCode.F,
+    Speed = Enum.KeyCode.G,
+    MenuKey = Enum.KeyCode.RightShift
+}
+ 
+local ContentContainer = Instance.new("Frame")
+ContentContainer.Size = UDim2.new(1, -24, 1, -90)
+ContentContainer.Position = UDim2.new(0, 12, 0, 75)
+ContentContainer.BackgroundTransparency = 1
+ContentContainer.Parent = MainFrame
+ 
+local pages = {}
+local function createPage(name)
+    local page = Instance.new("ScrollingFrame")
+    page.Name = name .. "Page"
+    page.Size = UDim2.new(1, 0, 1, 0)
+    page.BackgroundTransparency = 1
+    page.Visible = false
+    page.ScrollBarThickness = 4
+    page.Parent = ContentContainer
+    pages[name] = page
+    return page
+end
+ 
+local mainPage = createPage("main")
+local espPage = createPage("esp")
+local charPage = createPage("character")
+local ragePage = createPage("ragebot")
+local hvhPage = createPage("hvh")
+local keybindsPage = createPage("keybinds")
+local miscPage = createPage("misc")
+local settingsPage = createPage("settings")
+mainPage.Visible = true
+ 
+local function addLayout(parent)
+    local l = Instance.new("UIListLayout")
+    l.Padding = UDim.new(0, 8)
+    l.Parent = parent
+end
+addLayout(mainPage)
+addLayout(espPage)
+addLayout(charPage)
+addLayout(ragePage)
+addLayout(hvhPage)
+addLayout(keybindsPage)
+addLayout(miscPage)
+addLayout(settingsPage)
+ 
+local toggleButtons = {}
+ 
+local function createToggle(parent, text, initial, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 34)
+    btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    btn.BorderSizePixel = 1
+    btn.BorderColor3 = Color3.fromRGB(45, 45, 45)
+    btn.Font = Enum.Font.Code
+    btn.Text = (initial and "  [X] " or "  [ ] ") .. text
+    btn.TextColor3 = initial and Color3.fromRGB(100, 160, 255) or Color3.fromRGB(180, 180, 180)
+    btn.TextSize = 13
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.Parent = parent
+ 
+    local state = initial
+    local function update(newState)
+        state = newState
+        btn.Text = (state and "  [X] " or "  [ ] ") .. text
+        btn.TextColor3 = state and Color3.fromRGB(100, 160, 255) or Color3.fromRGB(180, 180, 180)
+        callback(state)
+    end
+ 
+    btn.MouseButton1Click:Connect(function()
+        update(not state)
+    end)
+ 
+    toggleButtons[text] = {Update = update, GetState = function() return state end}
+    return btn
+end
+ 
+local function createDualToggleRow(parent, label1, init1, cb1, label2, init2, cb2)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 34)
+    row.BackgroundTransparency = 1
+    row.Parent = parent
+ 
+    local function makeSubToggle(position, size, text, initial, callback)
+        local btn = Instance.new("TextButton")
+        btn.Size = size
+        btn.Position = position
+        btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+        btn.BorderSizePixel = 1
+        btn.BorderColor3 = Color3.fromRGB(45, 45, 45)
+        btn.Font = Enum.Font.Code
+        btn.Text = (initial and " [X] " or " [ ] ") .. text
+        btn.TextColor3 = initial and Color3.fromRGB(100, 160, 255) or Color3.fromRGB(180, 180, 180)
+        btn.TextSize = 12
+        btn.TextXAlignment = Enum.TextXAlignment.Left
+        btn.Parent = row
+ 
+        local state = initial
+        local function update(newState)
+            state = newState
+            btn.Text = (state and " [X] " or " [ ] ") .. text
+            btn.TextColor3 = state and Color3.fromRGB(100, 160, 255) or Color3.fromRGB(180, 180, 180)
+            callback(state)
+        end
+ 
+        btn.MouseButton1Click:Connect(function()
+            update(not state)
+        end)
+ 
+        toggleButtons[text] = {Update = update, GetState = function() return state end}
+        return btn
+    end
+ 
+    makeSubToggle(UDim2.new(0, 0, 0, 0), UDim2.new(0.48, 0, 1, 0), label1, init1, cb1)
+    makeSubToggle(UDim2.new(0.52, 0, 0, 0), UDim2.new(0.48, 0, 1, 0), label2, init2, cb2)
+end
+ 
+local function createSlider(parent, text, currentVal, minVal, maxVal, callback)
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(1, 0, 0, 34)
+    box.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    box.BorderColor3 = Color3.fromRGB(45, 45, 45)
+    box.Font = Enum.Font.Code
+    box.Text = "  " .. text .. ": " .. tostring(currentVal)
+    box.TextColor3 = Color3.fromRGB(200, 200, 200)
+    box.TextSize = 13
+    box.TextXAlignment = Enum.TextXAlignment.Left
+    box.Parent = parent
+ 
+    box.FocusLost:Connect(function()
+        local rawText = box.Text:match(": *([%d%.]+)") or box.Text
+        local num = tonumber(rawText)
+        if num then
+            num = math.clamp(num, minVal, maxVal)
+            box.Text = "  " .. text .. ": " .. tostring(num)
+            callback(num)
+        else
+            box.Text = "  " .. text .. ": " .. tostring(currentVal)
+        end
+    end)
+end
+ 
+local function createKeybindButton(parent, featureName, currentKey)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 34)
+    btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    btn.BorderSizePixel = 1
+    btn.BorderColor3 = Color3.fromRGB(45, 45, 45)
+    btn.Font = Enum.Font.Code
+    btn.Text = "  " .. featureName .. " Key: [" .. tostring(currentKey.Name or currentKey) .. "]"
+    btn.TextColor3 = Color3.fromRGB(180, 180, 180)
+    btn.TextSize = 13
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.Parent = parent
+ 
+    local listening = false
+    btn.MouseButton1Click:Connect(function()
+        listening = true
+        btn.Text = "  Press any key/mouse for " .. featureName .. "..."
+        local connection
+        connection = UserInputService.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Keyboard or input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.MouseButton2 or input.UserInputType == Enum.UserInputType.MouseButton3 then
+                local chosen = input.KeyCode ~= Enum.KeyCode.Unknown and input.KeyCode or input.UserInputType
+                Keybinds[featureName] = chosen
+                btn.Text = "  " .. featureName .. " Key: [" .. tostring(chosen.Name or chosen) .. "]"
+                listening = false
+                connection:Disconnect()
+            end
+        end)
+    end)
+end
+ 
+-- Populate Tabs
+createDualToggleRow(mainPage, "Aimbot", Config.Aimbot, function(v) Config.Aimbot = v end, "Silent Aim", Config.SilentAim, function(v) Config.SilentAim = v end)
+createToggle(mainPage, "Always Aimbot (Full Map)", Config.AlwaysAimbot, function(v) Config.AlwaysAimbot = v end)
+createToggle(mainPage, "Team Check (Main)", Config.TeamCheckMain, function(v) Config.TeamCheckMain = v end)
+createToggle(mainPage, "Visible Check", Config.VisibleCheck, function(v) Config.VisibleCheck = v end)
+createSlider(mainPage, "Aimbot FOV", Config.AimbotFOV, 10, 800, function(v) Config.AimbotFOV = v end)
+createSlider(mainPage, "Silent Aim FOV", Config.SilentAimFOV, 10, 800, function(v) Config.SilentAimFOV = v end)
+createSlider(mainPage, "Aimbot Smoothing", Config.Smoothing, 1, 30, function(v) Config.Smoothing = v end)
+createToggle(mainPage, "Triggerbot Enabled", Config.Triggerbot, function(v) Config.Triggerbot = v end)
+createToggle(mainPage, "Triggerbot Team Check", Config.TriggerbotTeamCheck, function(v) Config.TriggerbotTeamCheck = v end)
+ 
+createToggle(espPage, "Box ESP", Config.ESPBox, function(v) Config.ESPBox = v end)
+createToggle(espPage, "Skeleton ESP", Config.ESPSkeleton, function(v) Config.ESPSkeleton = v end)
+createToggle(espPage, "Name ESP", Config.ESPName, function(v) Config.ESPName = v end)
+createToggle(espPage, "Health Bar", Config.ESPHealthBar, function(v) Config.ESPHealthBar = v end)
+createToggle(espPage, "Team Check (ESP)", Config.TeamCheckESP, function(v) Config.TeamCheckESP = v end)
+ 
+createToggle(charPage, "Noclip", Config.Noclip, function(v) Config.Noclip = v end)
+createToggle(charPage, "Fly", Config.Fly, function(v) Config.Fly = v end)
+createToggle(charPage, "Speed Hack (WalkSpeed 50)", Config.Speed, function(v)
+    Config.Speed = v
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        LocalPlayer.Character.Humanoid.WalkSpeed = v and Config.SpeedVal or 16
+    end
+end)
+createToggle(charPage, "Infinite Jump", Config.InfJump, function(v) Config.InfJump = v end)
+ 
+createToggle(ragePage, "Ragebot Enabled", Config.Ragebot, function(v) Config.Ragebot = v end)
+createToggle(ragePage, "Orbit Target", Config.RagebotOrbit, function(v) Config.RagebotOrbit = v end)
+createSlider(ragePage, "Orbit Speed", Config.OrbitSpeed, 1, 10, function(v) Config.OrbitSpeed = v end)
+createSlider(ragePage, "Orbit Radius", Config.OrbitRadius, 3, 20, function(v) Config.OrbitRadius = v end)
+ 
+createToggle(hvhPage, "HvH Void Spam Attack", Config.HvHVoidSpam, function(v) Config.HvHVoidSpam = v end)
+ 
+local playerListContainer = Instance.new("ScrollingFrame")
+playerListContainer.Name = "PlayerListContainer"
+playerListContainer.Size = UDim2.new(1, 0, 0, 200)
+playerListContainer.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+playerListContainer.BorderColor3 = Color3.fromRGB(45, 45, 45)
+playerListContainer.ScrollBarThickness = 4
+playerListContainer.Parent = hvhPage
+ 
+local playerListLay = Instance.new("UIListLayout")
+playerListLay.Padding = UDim.new(0, 4)
+playerListLay.Parent = playerListContainer
+ 
+local function refreshPlayerList()
+    for _, child in ipairs(playerListContainer:GetChildren()) do
+        if child:IsA("TextButton") then
+            child:Destroy()
+        end
+    end
+ 
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            local pBtn = Instance.new("TextButton")
+            pBtn.Size = UDim2.new(1, 0, 0, 30)
+            pBtn.BackgroundColor3 = (Config.SelectedTarget == p.Name) and Color3.fromRGB(40, 80, 140) or Color3.fromRGB(28, 28, 28)
+            pBtn.BorderColor3 = Color3.fromRGB(45, 45, 45)
+            pBtn.Font = Enum.Font.Code
+            pBtn.Text = "  Target: " .. p.Name .. (Config.SelectedTarget == p.Name and " [SELECTED]" or "")
+            pBtn.TextColor3 = (Config.SelectedTarget == p.Name) and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(180, 180, 180)
+            pBtn.TextSize = 12
+            pBtn.TextXAlignment = Enum.TextXAlignment.Left
+            pBtn.Parent = playerListContainer
+ 
+            pBtn.MouseButton1Click:Connect(function()
+                Config.SelectedTarget = p.Name
+                refreshPlayerList()
+            end)
+        end
+    end
+end
+ 
+Players.PlayerAdded:Connect(refreshPlayerList)
+Players.PlayerRemoving:Connect(refreshPlayerList)
+task.spawn(function()
+    while task.wait(2) do
+        refreshPlayerList()
+    end
+end)
+refreshPlayerList()
+ 
+for name, key in pairs(Keybinds) do
+    if name ~= "MenuKey" then
+        createKeybindButton(keybindsPage, name, key)
+    end
+end
+ 
+createToggle(miscPage, "Auto-Load Script on Teleport (Rivals 1v1 support)", Config.AutoLoadTeleport, function(v) Config.AutoLoadTeleport = v end)
+ 
+local KeybindBoxWindow = Instance.new("Frame")
+KeybindBoxWindow.Name = "KeybindBoxWindow"
+KeybindBoxWindow.Size = UDim2.new(0, 240, 0, 280)
+KeybindBoxWindow.Position = UDim2.new(0, 12, 0, 100)
+KeybindBoxWindow.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+KeybindBoxWindow.BorderSizePixel = 1
+KeybindBoxWindow.BorderColor3 = Color3.fromRGB(45, 45, 45)
+KeybindBoxWindow.Parent = miscPage
+ 
+local KBTopBar = Instance.new("TextLabel")
+KBTopBar.Size = UDim2.new(1, 0, 0, 28)
+KBTopBar.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
+KBTopBar.BorderSizePixel = 0
+KBTopBar.Font = Enum.Font.Code
+KBTopBar.Text = "  Active Keybinds & Status"
+KBTopBar.TextColor3 = Color3.fromRGB(100, 160, 255)
+KBTopBar.TextSize = 12
+KBTopBar.TextXAlignment = Enum.TextXAlignment.Left
+KBTopBar.Parent = KeybindBoxWindow
+ 
+local kbDragging, kbDragInput, kbDragStart, kbStartPos
+KBTopBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        kbDragging = true
+        kbDragStart = input.Position
+        kbStartPos = KeybindBoxWindow.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                kbDragging = false
+            end
+        end)
+    end
+end)
+ 
+KBTopBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        kbDragInput = input
+    end
+end)
+ 
+UserInputService.InputChanged:Connect(function(input)
+    if input == kbDragInput and kbDragging then
+        local delta = input.Position - kbDragStart
+        KeybindBoxWindow.Position = UDim2.new(kbStartPos.X.Scale, kbStartPos.X.Offset + delta.X, kbStartPos.Y.Scale, kbStartPos.Y.Offset + delta.Y)
+    end
+end)
+ 
+local KBListContainer = Instance.new("ScrollingFrame")
+KBListContainer.Size = UDim2.new(1, -10, 1, -38)
+KBListContainer.Position = UDim2.new(0, 5, 0, 34)
+KBListContainer.BackgroundTransparency = 1
+KBListContainer.ScrollBarThickness = 3
+KBListContainer.Parent = KeybindBoxWindow
+ 
+local KBListLayout = Instance.new("UIListLayout")
+KBListLayout.Padding = UDim.new(0, 4)
+KBListLayout.Parent = KBListContainer
+ 
+local statusLabels = {}
+local function updateFeatureStatusDisplays()
+    for _, child in ipairs(KBListContainer:GetChildren()) do
+        if child:IsA("TextLabel") then child:Destroy() end
+    end
+    statusLabels = {}
+ 
+    local trackedFeatures = {
+        {"Aimbot", function() return Config.Aimbot and aimbotHeld end},
+        {"Silent Aim", function() return Config.SilentAim end},
+        {"Triggerbot", function() return Config.Triggerbot end},
+        {"Ragebot", function() return Config.Ragebot end},
+        {"Box ESP", function() return Config.ESPBox end},
+        {"Skeleton ESP", function() return Config.ESPSkeleton end},
+        {"Name ESP", function() return Config.ESPName end},
+        {"Health Bar", function() return Config.ESPHealthBar end},
+        {"Noclip", function() return Config.Noclip end},
+        {"Fly", function() return Config.Fly end},
+        {"Speed Hack", function() return Config.Speed end},
+        {"Infinite Jump", function() return Config.InfJump end},
+        {"HvH Void Spam", function() return Config.HvHVoidSpam end}
+    }
+ 
+    for _, info in ipairs(trackedFeatures) do
+        local name = info[1]
+        local checkFn = info[2]
+ 
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(1, 0, 0, 24)
+        lbl.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+        lbl.BorderColor3 = Color3.fromRGB(45, 45, 45)
+        lbl.Font = Enum.Font.Code
+        lbl.TextSize = 11
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+        lbl.Parent = KBListContainer
+ 
+        statusLabels[name] = {Label = lbl, Check = checkFn}
+    end
+end
+updateFeatureStatusDisplays()
+ 
+createKeybindButton(settingsPage, "MenuKey", Keybinds.MenuKey)
+ 
+if queueteleport then
+    TeleportService.TeleportInitFailed:Connect(function() end)
+    LocalPlayer.OnTeleport:Connect(function(teleportState)
+        if Config.AutoLoadTeleport then
+            queueteleport([[
+                loadstring(game:HttpGet("YOUR_SCRIPT_URL_HERE"))()
+            ]])
+        end
+    end)
+end
+ 
+local copyDiscordBtn = Instance.new("TextButton")
+copyDiscordBtn.Size = UDim2.new(1, 0, 0, 34)
+copyDiscordBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+copyDiscordBtn.BorderColor3 = Color3.fromRGB(45, 45, 45)
+copyDiscordBtn.Font = Enum.Font.Code
+copyDiscordBtn.Text = "Copy Discord Link (discord.gg/7ZxCXQYDF)"
+copyDiscordBtn.TextColor3 = Color3.fromRGB(100, 160, 255)
+copyDiscordBtn.TextSize = 12
+copyDiscordBtn.Parent = settingsPage
+ 
+copyDiscordBtn.MouseButton1Click:Connect(function()
+    if setclipboard then
+        setclipboard("https://discord.gg/7ZxCXQYDF")
+        copyDiscordBtn.Text = "Copied to Clipboard!"
+        task.wait(1.5)
+        copyDiscordBtn.Text = "Copy Discord Link (discord.gg/7ZxCXQYDF)"
+    else
+        copyDiscordBtn.Text = "Clipboard Not Supported"
+        task.wait(1.5)
+        copyDiscordBtn.Text = "Copy Discord Link (discord.gg/7ZxCXQYDF)"
+    end
+end)
+ 
+local configBox = Instance.new("TextBox")
+configBox.Size = UDim2.new(1, 0, 0, 34)
+configBox.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+configBox.BorderColor3 = Color3.fromRGB(45, 45, 45)
+configBox.Font = Enum.Font.Code
+configBox.PlaceholderText = "Config Name..."
+configBox.Text = "default"
+configBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+configBox.TextSize = 13
+configBox.Parent = settingsPage
+ 
+local saveBtn = Instance.new("TextButton")
+saveBtn.Size = UDim2.new(1, 0, 0, 34)
+saveBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+saveBtn.BorderColor3 = Color3.fromRGB(45, 45, 45)
+saveBtn.Font = Enum.Font.Code
+saveBtn.Text = "Save Config"
+saveBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+saveBtn.TextSize = 13
+saveBtn.Parent = settingsPage
+ 
+saveBtn.MouseButton1Click:Connect(function()
+    local data = HttpService:JSONEncode(Config)
+    if writefile then
+        writefile("ProjectLConfig_" .. configBox.Text .. ".json", data)
+    end
+end)
+ 
+local loadBtn = Instance.new("TextButton")
+loadBtn.Size = UDim2.new(1, 0, 0, 34)
+loadBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+loadBtn.BorderColor3 = Color3.fromRGB(45, 45, 45)
+loadBtn.Font = Enum.Font.Code
+loadBtn.Text = "Load Config"
+loadBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+loadBtn.TextSize = 13
+loadBtn.Parent = settingsPage
+ 
+loadBtn.MouseButton1Click:Connect(function()
+    local filename = "ProjectLConfig_" .. configBox.Text .. ".json"
+    if readfile and pcall(function() readfile(filename) end) then
+        local decoded = HttpService:JSONDecode(readfile(filename))
+        for k, v in pairs(decoded) do
+            Config[k] = v
+        end
+    end
+end)
+ 
+local tabNames = {"main", "esp", "character", "ragebot", "hvh", "keybinds", "misc", "settings"}
+ 
+local tabHolder = Instance.new("Frame")
+tabHolder.Size = UDim2.new(1, 0, 0, 32)
+tabHolder.Position = UDim2.new(0, 12, 0, 35)
+tabHolder.BackgroundTransparency = 1
+tabHolder.Parent = MainFrame
+ 
+for i, name in ipairs(tabNames) do
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 64, 1, 0)
+    btn.Position = UDim2.new(0, (i-1) * 68, 0, 0)
+    btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    btn.BorderSizePixel = 1
+    btn.BorderColor3 = Color3.fromRGB(45, 45, 45)
+    btn.Font = Enum.Font.Code
+    btn.Text = name
+    btn.TextColor3 = Color3.fromRGB(180, 180, 180)
+    btn.TextSize = 10
+    btn.Parent = tabHolder
+ 
+    btn.MouseButton1Click:Connect(function()
+        for _, p in pairs(pages) do p.Visible = false end
+        if pages[name] then pages[name].Visible = true end
+    end)
+end
+ 
+local aimbotHeld = false
+ 
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed then
+        local inputType = input.UserInputType
+        local keyCode = input.KeyCode
+ 
+        if Keybinds.Aimbot == keyCode or Keybinds.Aimbot == inputType then
+            aimbotHeld = true
+        end
+ 
+        if Keybinds.MenuKey == keyCode or Keybinds.MenuKey == inputType then
+            MainFrame.Visible = not MainFrame.Visible
+        end
+ 
+        for feat, boundKey in pairs(Keybinds) do
+            if feat ~= "Aimbot" and feat ~= "MenuKey" then
+                if boundKey == keyCode or boundKey == inputType then
+                    if feat == "ESPAll" then
+                        local newState = not Config.ESPBox
+                        Config.ESPBox = newState
+                        Config.ESPSkeleton = newState
+                        Config.ESPName = newState
+                        Config.ESPHealthBar = newState
+                        Config.TeamCheckESP = newState
+ 
+                        if toggleButtons["Box ESP"] then toggleButtons["Box ESP"].Update(newState) end
+                        if toggleButtons["Skeleton ESP"] then toggleButtons["Skeleton ESP"].Update(newState) end
+                        if toggleButtons["Name ESP"] then toggleButtons["Name ESP"].Update(newState) end
+                        if toggleButtons["Health Bar"] then toggleButtons["Health Bar"].Update(newState) end
+                        if toggleButtons["Team Check (ESP)"] then toggleButtons["Team Check (ESP)"].Update(newState) end
+                    else
+                        Config[feat] = not Config[feat]
+                        local lookupName = feat
+                        if feat == "Triggerbot" then lookupName = "Triggerbot Enabled"
+                        elseif feat == "Ragebot" then lookupName = "Ragebot Enabled"
+                        elseif feat == "Speed" then lookupName = "Speed Hack (WalkSpeed 50)" end
+ 
+                        if toggleButtons[lookupName] then
+                            toggleButtons[lookupName].Update(Config[feat])
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+ 
+UserInputService.InputEnded:Connect(function(input)
+    if Keybinds.Aimbot == input.KeyCode or Keybinds.Aimbot == input.UserInputType then
+        aimbotHeld = false
+    end
+end)
+ 
+local espDrawings = {}
+local function clearESP()
+    for _, obj in pairs(espDrawings) do
+        if typeof(obj) == "table" then
+            for _, d in pairs(obj) do if d.Remove then d:Remove() end end
+        elseif obj.Remove then
+            obj:Remove()
+        end
+    end
+    espDrawings = {}
+end
+ 
+local function isVisible(targetPart)
+    if not Config.VisibleCheck then return true end
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("Head") then return true end
+ 
+    local origin = LocalPlayer.Character.Head.Position
+    local direction = targetPart.Position - origin
+ 
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    raycastParams.IgnoreWater = true
+ 
+    local ignoreList = {LocalPlayer.Character}
+    if LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        table.insert(ignoreList, LocalPlayer.Character.HumanoidRootPart)
+    end
+    raycastParams.FilterDescendantsInstances = ignoreList
+ 
+    local result = workspace:Raycast(origin, direction, raycastParams)
+    if result then
+        local hitPart = result.Instance
+        if hitPart:IsDescendantOf(targetPart.Parent) then
+            return true
+        end
+        return false
+    end
+    return true
+end
+ 
+local lastTriggerTick = 0
+local voidSpamPhase = 0
+local voidSpamTimer = 0
+ 
+RunService.RenderStepped:Connect(function(dt)
+    clearESP()
+ 
+    for name, data in pairs(statusLabels) do
+        local active = data.Check()
+        data.Label.Text = "  [" .. (active and "ACTIVE" or "OFF") .. "] " .. name
+        data.Label.TextColor3 = active and Color3.fromRGB(100, 160, 255) or Color3.fromRGB(150, 150, 150)
+    end
+ 
+    if Config.Aimbot then
+        local fovCircle = Drawing.new("Circle")
+        fovCircle.Visible = true
+        fovCircle.Transparency = 0.7
+        fovCircle.Color = Color3.fromRGB(255, 255, 255)
+        fovCircle.Thickness = 1
+        fovCircle.NumSides = 64
+        fovCircle.Radius = Config.AimbotFOV
+        fovCircle.Filled = false
+        fovCircle.Position = UserInputService:GetMouseLocation()
+        table.insert(espDrawings, fovCircle)
+    end
+ 
+    if Config.SilentAim then
+        local silentCircle = Drawing.new("Circle")
+        silentCircle.Visible = true
+        silentCircle.Transparency = 0.7
+        silentCircle.Color = Color3.fromRGB(100, 160, 255)
+        silentCircle.Thickness = 1
+        silentCircle.NumSides = 64
+        silentCircle.Radius = Config.SilentAimFOV
+        silentCircle.Filled = false
+        silentCircle.Position = UserInputService:GetMouseLocation()
+        table.insert(espDrawings, silentCircle)
+    end
+ 
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") and p.Character:FindFirstChild("Head") and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
+            local isTeam = Config.TeamCheckESP and p.Team == LocalPlayer.Team
+            if not isTeam then
+                local root = p.Character.HumanoidRootPart
+                local head = p.Character.Head
+                local rootPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+ 
+                if onScreen then
+                    local headPos = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
+                    local legPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
+                    local height = math.abs(headPos.Y - legPos.Y)
+                    local width = height / 2
+ 
+                    if Config.ESPBox then
+                        local box = Drawing.new("Square")
+                        box.Visible = true
+                        box.Size = Vector2.new(width, height)
+                        box.Position = Vector2.new(rootPos.X - width/2, rootPos.Y - height/2)
+                        box.Color = Color3.fromRGB(255, 255, 255)
+                        box.Thickness = 1
+                        box.Filled = false
+                        table.insert(espDrawings, box)
+                    end
+ 
+                    if Config.ESPName then
+                        local nameText = Drawing.new("Text")
+                        nameText.Visible = true
+                        nameText.Text = p.Name
+                        nameText.Size = 14
+                        nameText.Center = true
+                        nameText.Outline = true
+                        nameText.Color = Color3.fromRGB(255, 255, 255)
+                        nameText.Position = Vector2.new(rootPos.X, rootPos.Y - height/2 - 18)
+                        table.insert(espDrawings, nameText)
+                    end
+ 
+                    if Config.ESPSkeleton then
+                        local char = p.Character
+                        local joints = {
+                            {"Head", "UpperTorso"},
+                            {"UpperTorso", "LowerTorso"},
+                            {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"LeftLowerArm", "LeftHand"},
+                            {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"},
+                            {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"},
+                            {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"}
+                        }
+                        for _, joint in ipairs(joints) do
+                            local partA = char:FindFirstChild(joint[1])
+                            local partB = char:FindFirstChild(joint[2])
+                            if partA and partB then
+                                local posA, visA = Camera:WorldToViewportPoint(partA.Position)
+                                local posB, visB = Camera:WorldToViewportPoint(partB.Position)
+                                if visA and visB then
+                                    local line = Drawing.new("Line")
+                                    line.Visible = true
+                                    line.From = Vector2.new(posA.X, posA.Y)
+                                    line.To = Vector2.new(posB.X, posB.Y)
+                                    line.Color = Color3.fromRGB(255, 255, 255)
+                                    line.Thickness = 1
+                                    table.insert(espDrawings, line)
+                                end
+                            end
+                        end
+                    end
+ 
+                    if Config.ESPHealthBar then
+                        local healthBar = Drawing.new("Line")
+                        healthBar.Visible = true
+                        healthBar.From = Vector2.new(rootPos.X - width/2 - 6, rootPos.Y + height/2)
+                        healthBar.To = Vector2.new(rootPos.X - width/2 - 6, rootPos.Y + height/2 - (height * (p.Character.Humanoid.Health / p.Character.Humanoid.MaxHealth)))
+                        healthBar.Color = Color3.fromRGB(0, 255, 0)
+                        healthBar.Thickness = 2
+                        table.insert(espDrawings, healthBar)
+                    end
+                end
+            end
+        end
+    end
+ 
+    if Config.HvHVoidSpam and Config.SelectedTarget ~= "" then
+        local targetPlayer = Players:FindFirstChild(Config.SelectedTarget)
+        if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local tHRP = targetPlayer.Character.HumanoidRootPart
+            local myHRP = LocalPlayer.Character.HumanoidRootPart
+            local tHead = targetPlayer.Character:FindFirstChild("Head")
+ 
+            voidSpamTimer = voidSpamTimer + dt
+            if voidSpamPhase == 0 then
+                myHRP.CFrame = CFrame.new(0, -9999, 0)
+                myHRP.Velocity = Vector3.new(0, 0, 0)
+                if voidSpamTimer >= 0.5 then
+                    voidSpamTimer = 0
+                    voidSpamPhase = 1
+                end
+            elseif voidSpamPhase == 1 then
+                if tHead then
+                    local behindPos = tHRP.Position - (tHRP.CFrame.LookVector * 10) + Vector3.new(0, 3, 0)
+ 
+                    Camera.CFrame = CFrame.new(Camera.CFrame.Position, tHead.Position)
+                    myHRP.CFrame = CFrame.new(behindPos, tHRP.Position)
+ 
+                    local char = LocalPlayer.Character
+                    if char then
+                        local tool = char:FindFirstChildOfClass("Tool")
+                        if tool then
+                            pcall(function() tool:Activate() end)
+                        end
+                    end
+                    pcall(function()
+                        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+                        task.wait(0.01)
+                        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+                    end)
+                end
+                if voidSpamTimer >= 0.25 then
+                    voidSpamTimer = 0
+                    voidSpamPhase = 0
+                end
+            end
+        end
+    end
+ 
+    local targetHead = nil
+    local targetRoot = nil
+    local minDist = Config.AimbotFOV
+    local mousePos = UserInputService:GetMouseLocation()
+    local camPos = Camera.CFrame.Position
+ 
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("Head") and p.Character:FindFirstChild("HumanoidRootPart") and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
+            local isTeam = Config.TeamCheckMain and p.Team == LocalPlayer.Team
+            if not isTeam then
+                local head = p.Character.Head
+                local root = p.Character.HumanoidRootPart
+                local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+ 
+                if isVisible(head) then
+                    if Config.AlwaysAimbot then
+                        local dist = (camPos - head.Position).Magnitude
+                        if dist < minDist then
+                            minDist = dist
+                            targetHead = head
+                            targetRoot = root
+                        end
+                    else
+                        if onScreen then
+                            local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
+                            if dist < minDist then
+                                minDist = dist
+                                targetHead = head
+                                targetRoot = root
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+ 
+    if Config.Ragebot and targetRoot and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and not Config.HvHVoidSpam then
+        local myHRP = LocalPlayer.Character.HumanoidRootPart
+        if Config.RagebotOrbit then
+            local tickTime = tick() * Config.OrbitSpeed
+            local offsetX = math.cos(tickTime) * Config.OrbitRadius
+            local offsetZ = math.sin(tickTime) * Config.OrbitRadius
+            myHRP.CFrame = CFrame.new(targetRoot.Position + Vector3.new(offsetX, 5, offsetZ), targetRoot.Position)
+        else
+            local behindOffset = -targetRoot.CFrame.LookVector * 3 + Vector3.new(0, 5, 0)
+            myHRP.CFrame = CFrame.new(targetRoot.Position + behindOffset, targetRoot.Position)
+        end
+    end
+ 
+    if Config.Aimbot and aimbotHeld and targetHead then
+        local goalCFrame = CFrame.new(Camera.CFrame.Position, targetHead.Position)
+        Camera.CFrame = Camera.CFrame:Lerp(goalCFrame, 1 / math.max(Config.Smoothing, 1))
+    end
+ 
+    if Config.Triggerbot and not Config.HvHVoidSpam then
+        local mouse = LocalPlayer:GetMouse()
+        local target = mouse.Target
+        if target and target.Parent then
+            local charModel = target.Parent
+            local hum = charModel:FindFirstChildOfClass("Humanoid")
+            local p = Players:GetPlayerFromCharacter(charModel)
+            local isTeam = (Config.TeamCheckMain or Config.TriggerbotTeamCheck) and p and p.Team == LocalPlayer.Team
+ 
+            if hum and charModel ~= LocalPlayer.Character and p and not isTeam and hum.Health > 0 then
+                if isVisible(target) then
+                    if tick() - lastTriggerTick > 0.12 then
+                        lastTriggerTick = tick()
+ 
+                        local char = LocalPlayer.Character
+                        if char then
+                            local tool = char:FindFirstChildOfClass("Tool")
+                            if tool then
+                                pcall(function() tool:Activate() end)
+                            end
+                        end
+ 
+                        pcall(function()
+                            VirtualInputManager:SendMouseButtonEvent(mouse.X, mouse.Y, 0, true, game, 1)
+                            task.wait(0.01)
+                            VirtualInputManager:SendMouseButtonEvent(mouse.X, mouse.Y, 0, false, game, 1)
+                        end)
+                    end
+                end
+            end
+        end
+    end
+ 
+    if Config.Noclip and LocalPlayer.Character then
+        for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+            if part:IsA("BasePart") then part.CanCollide = false end
+        end
+    end
+ 
+    if Config.Fly and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        local hrp = LocalPlayer.Character.HumanoidRootPart
+        hrp.Velocity = Vector3.new(0, 1, 0)
+        local camCF = Camera.CFrame
+        local moveDir = Vector3.new()
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + camCF.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - camCF.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - camCF.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + camCF.RightVector end
+        hrp.CFrame = hrp.CFrame + (moveDir * 1)
+    end
+ 
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        LocalPlayer.Character.Humanoid.WalkSpeed = Config.Speed and Config.SpeedVal or 16
+    end
+end)
+ 
+UserInputService.JumpRequest:Connect(function()
+    if Config.InfJump and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        LocalPlayer.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+end)
