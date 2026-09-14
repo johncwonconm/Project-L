@@ -11,7 +11,7 @@ if (identifyexecutor and identifyexecutor() == "Wave") then
 end;
 
 -- Replace these GameId / PlaceId values with the IDs for your target games
-if (game.GameId == 6035872082) then
+if (game.GameId == 8737899170) then
     loadstring(game:HttpGet("https://project-l-one-lac.vercel.app/api/get-script?key=P249587n2gn238097bo4kn"))();
 elseif (game.GameId == 1008451066) then
     loadstring(game:HttpGet("https://project-l-one-lac.vercel.app/api/get-script?key=P249587n2gn238097bo4kn"))();
